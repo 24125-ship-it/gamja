@@ -1,10 +1,9 @@
 import os
-import random
 import requests
 import urllib.parse
 from flask import Flask, request, jsonify
 from bs4 import BeautifulSoup
-from openai import OpenAI
+import anthropic
 from dotenv import load_dotenv
 
 # .env 파일에서 환경변수 로드
@@ -12,8 +11,8 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# OpenAI 클라이언트 초기화
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Anthropic(Claude) 클라이언트 초기화
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 def kakao_text(text):
     """카카오톡 텍스트 응답 규격 생성 (1000자 제한 안전장치)"""
@@ -31,7 +30,7 @@ def kakao_text(text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "재테크메이트 Server is running 💰"
+    return "재테크메이트 (Claude Version) is running 💰"
 
 # 1. 파라미터 확인용 스킬 (블록 10 연결용)
 @app.route("/params-check", methods=["POST"])
@@ -52,7 +51,6 @@ def params_check():
 @app.route("/google-news", methods=["POST"])
 def google_news():
     data = request.get_json(silent=True) or {}
-    # 카카오 오픈빌더에서 '종목명'이라는 파라미터로 값을 넘겨준다고 가정
     company = data.get("action", {}).get("params", {}).get("종목명", "").strip()
 
     if not company:
@@ -68,7 +66,7 @@ def google_news():
         items = soup.find_all("item")
 
         titles = []
-        for item in items[:5]: # 상위 5개 추출
+        for item in items[:5]:
             title = item.title.text
             if title:
                 titles.append(title)
@@ -83,33 +81,29 @@ def google_news():
 
     return jsonify(kakao_text(result))
 
-# 3. AI 경제 선생님 & 소비 반성문 스킬 (블록 11, 12, 13 연결용)
-@app.route("/chatgpt-finance", methods=["POST"])
-def chatgpt_finance():
+# 3. Claude AI 경제 선생님 스킬 (블록 11, 12, 13 연결용)
+@app.route("/claude-finance", methods=["POST"])
+def claude_finance():
     data = request.get_json(silent=True) or {}
-    # 사용자의 질문이나 소비 내역을 '질문'이라는 파라미터로 받음
     user_input = data.get("action", {}).get("params", {}).get("질문", "").strip()
 
     if not user_input:
         return jsonify(kakao_text("경제 용어를 물어보시거나, 오늘의 소비 내역을 고백해 보세요!"))
 
-    if not os.getenv("OPENAI_API_KEY"):
-        return jsonify(kakao_text("OPENAI_API_KEY 환경변수가 설정되지 않았습니다."))
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return jsonify(kakao_text("ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다."))
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "당신은 냉철하고 똑똑한 재테크 전문가이자 경제 선생님입니다. 사용자가 경제 용어를 물어보면 초등학생도 이해할 수 있게 비유해서 설명하고, 돈을 썼다거나 과소비를 했다고 하면 뼈 때리는 조언(팩트폭력)을 짧고 굵게 해주세요. 답변은 모바일 메신저에 맞게 간결하고 가독성 좋게 작성하세요."
-                },
-                {"role": "user", "content": user_input}
-            ],
+        response = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=500,
             temperature=0.7,
-            max_tokens=500
+            system="당신은 냉철하고 똑똑한 재테크 전문가이자 경제 선생님입니다. 사용자가 경제 용어를 물어보면 초등학생도 이해할 수 있게 비유해서 설명하고, 돈을 썼다거나 과소비를 했다고 하면 뼈 때리는 조언(팩트폭력)을 짧고 굵게 해주세요. 답변은 모바일 메신저에 맞게 간결하고 가독성 좋게 작성하세요.",
+            messages=[
+                {"role": "user", "content": user_input}
+            ]
         )
-        result_text = response.choices[0].message.content.strip()
+        result_text = response.content[0].text
         
     except Exception as e:
         result_text = f"AI 분석 중 오류 발생: {str(e)}"
