@@ -17,7 +17,6 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def kakao_text(text):
     """카카오톡 텍스트 응답 규격 생성 (1000자 제한 안전장치)"""
-    # 만약의 상황을 대비해 950자에서 자르고 말줄임표를 추가합니다.
     safe_text = text[:950] + "..." if len(text) > 950 else text
     return {
         "version": "2.0",
@@ -32,36 +31,9 @@ def kakao_text(text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Server is running."
+    return "재테크메이트 Server is running 💰"
 
-# 기존 테스트용
-@app.route("/text", methods=["GET", "POST"])
-def text_skill():
-    return jsonify(kakao_text(str(random.randint(1, 10))))
-
-@app.route("/image", methods=["GET", "POST"])
-def image_skill():
-    response = {
-        "version": "2.0",
-        "template": {
-            "outputs": [{
-                "simpleImage": {
-                    "imageUrl": "https://t1.daumcdn.net/friends/prod/category/M001_friends_ryan2.jpg",
-                    "altText": "hello I'm Ryan"
-                }
-            }]
-        }
-    }
-    return jsonify(response)
-
-# 1. 데이터 그대로 주고받기
-@app.route("/echo", methods=["POST"])
-def echo_skill():
-    data = request.get_json(silent=True) or {}
-    user_input = data.get("userRequest", {}).get("utterance", "입력값이 없습니다.")
-    return jsonify(kakao_text(user_input))
-
-# 3. 시간/발화/파라미터 확인
+# 1. 파라미터 확인용 스킬 (블록 10 연결용)
 @app.route("/params-check", methods=["POST"])
 def params_check():
     data = request.get_json(silent=True) or {}
@@ -69,31 +41,29 @@ def params_check():
     action = data.get("action", {})
     params = action.get("params", {})
 
-    a = user_request.get("timezone", "timezone 없음")
-    b = user_request.get("utterance", "utterance 없음")
-    c = params.get("파라미터", "파라미터 없음")
-    d = params.get("파라미터2", "파라미터2 없음")
+    b = user_request.get("utterance", "입력된 발화 없음")
+    c = params.get("종목명", "종목명 파라미터 없음")
+    d = params.get("질문", "질문 파라미터 없음")
 
-    text = f"{a} / {b} / {c} / {d}"
+    text = f"🗣️ 사용자 발화: {b}\n📈 인식된 종목: {c}\n❓ 인식된 질문: {d}"
     return jsonify(kakao_text(text))
 
-# 4. [수정됨] RSS 방식을 활용한 구글 뉴스 가져오기
+# 2. 구글 뉴스 크롤링 스킬 (블록 6 연결용 - 관심 종목 뉴스)
 @app.route("/google-news", methods=["POST"])
 def google_news():
     data = request.get_json(silent=True) or {}
-    y = data.get("action", {}).get("params", {}).get("파라미터", "").strip()
+    # 카카오 오픈빌더에서 '종목명'이라는 파라미터로 값을 넘겨준다고 가정
+    company = data.get("action", {}).get("params", {}).get("종목명", "").strip()
 
-    if not y:
-        return jsonify(kakao_text("파라미터 값이 없습니다."))
+    if not company:
+        return jsonify(kakao_text("어떤 종목의 뉴스를 찾으시나요? 종목명을 정확히 입력해 주세요. (예: 삼성전자 뉴스)"))
 
-    # RSS 피드 주소 사용 (가장 안정적)
-    query = urllib.parse.quote(y)
+    query = urllib.parse.quote(company)
     url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
         r = requests.get(url, headers=headers, timeout=10)
-        # XML 구조를 파싱합니다.
         soup = BeautifulSoup(r.text, "xml")
         items = soup.find_all("item")
 
@@ -104,23 +74,24 @@ def google_news():
                 titles.append(title)
 
         if titles:
-            result = f"['{y}'] 뉴스 검색 결과:\n\n" + "\n\n".join([f"{i+1}. {t}" for i, t in enumerate(titles)])
+            result = f"📰 ['{company}'] 최신 주가/경제 뉴스:\n\n" + "\n\n".join([f"{i+1}. {t}" for i, t in enumerate(titles)])
         else:
-            result = f"['{y}']에 대한 검색 결과를 찾지 못했습니다."
-
+            result = f"['{company}']에 대한 최신 뉴스를 찾지 못했습니다."
+            
     except Exception as e:
         result = f"뉴스 조회 중 오류 발생: {str(e)}"
 
     return jsonify(kakao_text(result))
 
-# 5. 파라미터로 ChatGPT 연동하기
-@app.route("/chatgpt-param", methods=["POST"])
-def chatgpt_param():
+# 3. AI 경제 선생님 & 소비 반성문 스킬 (블록 11, 12, 13 연결용)
+@app.route("/chatgpt-finance", methods=["POST"])
+def chatgpt_finance():
     data = request.get_json(silent=True) or {}
-    tt = data.get("action", {}).get("params", {}).get("파라미터", "").strip()
+    # 사용자의 질문이나 소비 내역을 '질문'이라는 파라미터로 받음
+    user_input = data.get("action", {}).get("params", {}).get("질문", "").strip()
 
-    if not tt:
-        return jsonify(kakao_text("파라미터 값이 없습니다."))
+    if not user_input:
+        return jsonify(kakao_text("경제 용어를 물어보시거나, 오늘의 소비 내역을 고백해 보세요!"))
 
     if not os.getenv("OPENAI_API_KEY"):
         return jsonify(kakao_text("OPENAI_API_KEY 환경변수가 설정되지 않았습니다."))
@@ -129,19 +100,21 @@ def chatgpt_param():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "당신은 유능한 카카오톡 챗봇입니다. 답변은 간결하고 명확하게 하세요."},
-                {"role": "user", "content": tt}
+                {
+                    "role": "system", 
+                    "content": "당신은 냉철하고 똑똑한 재테크 전문가이자 경제 선생님입니다. 사용자가 경제 용어를 물어보면 초등학생도 이해할 수 있게 비유해서 설명하고, 돈을 썼다거나 과소비를 했다고 하면 뼈 때리는 조언(팩트폭력)을 짧고 굵게 해주세요. 답변은 모바일 메신저에 맞게 간결하고 가독성 좋게 작성하세요."
+                },
+                {"role": "user", "content": user_input}
             ],
             temperature=0.7,
-            max_tokens=500  # 카카오톡 글자수 제한을 고려해 답변 길이 축소
+            max_tokens=500
         )
         result_text = response.choices[0].message.content.strip()
         
     except Exception as e:
-        result_text = f"ChatGPT 호출 중 오류 발생: {str(e)}"
+        result_text = f"AI 분석 중 오류 발생: {str(e)}"
 
     return jsonify(kakao_text(result_text))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
